@@ -4,13 +4,17 @@ def config():
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--consume", default="training_data.csv", help="input training data file name")
-    parser.add_argument("--generate", default="testing_data.csv", help="input testing data file name")
-    parser.add_argument("--output", default="output.csv", help="output file name")
-    args = parser.parse_args()
+    parser.add_argument("--consumption", default="training_data.csv", help="input the consumption data path")
+    parser.add_argument("--generation", default="testing_data.csv", help="input the generation data path")
+    parser.add_argument("--bidresult", default="output.csv", help="input the bids result path")
+    parser.add_argument("--output", default="output.csv", help="output the bids path")
+
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
     args = config()
 
-    # You can write code above the if-main block.
-    pass
+    with open(args.output, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["test", 1, 2, 3])

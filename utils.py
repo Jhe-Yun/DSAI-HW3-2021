@@ -7,9 +7,8 @@ from loguru import logger
 
 
 def sync_student(upload_page, student_page):
-    col_num = len(student_page.get_row(1, include_tailing_empty=False))
     row_num = len(student_page.get_col(1, include_tailing_empty=False))
-    data = student_page.get_values((2, 1), (row_num, col_num))
+    data = student_page.get_values((2, 1), (row_num, 2))
     upload_page.update_values(crange=(2, 1), values=data)
 
 
@@ -71,7 +70,7 @@ def file_manage(student_list, root_path):
 
 def unzip_file(student_id, file_box):
     try:
-        server_file_path = f"./data/{file_box[student_id]['filename']}"
+        server_file_path = f"./data/code/{file_box[student_id]['filename']}"
         if not os.path.isdir(server_file_path):
             os.system(f"sudo unzip {file_box[student_id]['path']} -d {server_file_path}")
             logger.info(f"success unzip {file_box[student_id]['filename']} file")
@@ -81,12 +80,54 @@ def unzip_file(student_id, file_box):
         logger.error(e)
 
 
-def multi_processing(file_box):
+def execute_student_code(student_id, file_box, *args):
+    os.chdir(f"./data/code/{file_box[student_id]['filename']}/")
+    logger.debug(f"{student_id} after change path: {os.getcwd()}")
+
+    # args_action = {
+    #     "first": os.system("echo 'y' | pipenv install"),
+    #     "last": os.system("pipenv --rm")
+    # }
+    if args[0] == "first":
+        os.system("echo 'y' | pipenv install")
+        logger.success(f"{student_id} env installed")
+
+    result = os.system(f"pipenv run python main.py --consumption ../../input/consumption/1_1_1225-1231\
+                                                   --output ../../output/{file_box[student_id]['filename']}.csv")
+
+    if args[0] == "last":
+        os.system("pipenv --rm")
+        logger.success(f"{student_id} env deleted")
+
+    if result == 0:
+        logger.success(f"{student_id} code successfully executed")
+    else:
+        logger.error(f"{student_id} code have bug")
+
+    return
+
+
+def period_transaction(file_box):
+    # call match.py
+    # os.chdir("")
+    # exception handling (first user `pipenv install`)
+    multi_processing(execute_student_code, file_box, "first")
+    logger.info("the first time, all student code is executed (pipenv install)")
+
+    for agent in range(1, len(file_box.keys())):
+        multi_processing(execute_student_code, file_box)
+        logger.info(f"for the {agent} time, all student code have been executed")
+
+    multi_processing(execute_student_code, file_box, "last")
+    logger.info("the last time, all student code is executed (pipenv --rm)")
+
+
+def multi_processing(func, file_box, *args):
     with mp.Pool(8) as pool:
         for student_id in file_box.keys():
             pool.apply_async(
-                unzip_file,
-                (student_id, file_box, )
+                func,
+                (student_id, file_box, *args)
             )
         pool.close()
         pool.join()
@@ -110,8 +151,11 @@ def routine(upload_page, student_page, upload_root_path):
     upload_df = sync_upload_page(upload_df, file_box)
     logger.info("sync upload_df")
 
-    multi_processing(file_box)
+    multi_processing(unzip_file, file_box)
     logger.info("unzip all student file")
+
+    period_transaction(file_box)
+    logger.info("all matchs are done")
 
     upload_page.set_dataframe(upload_df, start="A2", copy_head=False, copy_index=True, nan='')
     logger.info("update upload page")
