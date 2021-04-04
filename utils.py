@@ -88,14 +88,13 @@ def execute_student_code(student_id, file_box, *args):
     #     "first": os.system("echo 'y' | pipenv install"),
     #     "last": os.system("pipenv --rm")
     # }
-    if args[0] == "first":
+    if args and args[0] == "first":
         os.system("echo 'y' | pipenv install")
         logger.success(f"{student_id} env installed")
 
     result = os.system(f"pipenv run python main.py --consumption ../../input/consumption/1_1_1225-1231\
                                                    --output ../../output/{file_box[student_id]['filename']}.csv")
-
-    if args[0] == "last":
+    if args and args[0] == "last":
         os.system("pipenv --rm")
         logger.success(f"{student_id} env deleted")
 
@@ -108,22 +107,26 @@ def execute_student_code(student_id, file_box, *args):
 
 
 def period_transaction(file_box):
-    # call match.py
-    # os.chdir("")
-    # exception handling (first user `pipenv install`)
     multi_processing(execute_student_code, file_box, "first")
     logger.info("the first time, all student code is executed (pipenv install)")
 
-    for agent in range(1, len(file_box.keys())):
+    for agent in range(1, len(file_box.keys())-1):
         multi_processing(execute_student_code, file_box)
         logger.info(f"for the {agent} time, all student code have been executed")
 
     multi_processing(execute_student_code, file_box, "last")
-    logger.info("the last time, all student code is executed (pipenv --rm)")
+    logger.info(f"the {len(file_box.keys())} (last) time, all student code is executed (pipenv --rm)")
+
+
+def all_bid_output(student_id):
+    # read csv from /data/output/...
+    # insert bid to database
+    # add "uuid" & "execute_code_time"(or other identify name) column
+    pass
 
 
 def multi_processing(func, file_box, *args):
-    with mp.Pool(8) as pool:
+    with mp.Pool(mp.cpu_count()-2) as pool:
         for student_id in file_box.keys():
             pool.apply_async(
                 func,
@@ -144,6 +147,7 @@ def routine(upload_page, student_page, upload_root_path):
                                       end=(row_num, col_num),
                                       numerize=False,
                                       include_tailing_empty=False)
+    upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
     logger.info("get upload page")
 
     file_box = file_manage(list(upload_df.index), upload_root_path)
@@ -160,7 +164,7 @@ def routine(upload_page, student_page, upload_root_path):
     upload_page.set_dataframe(upload_df, start="A2", copy_head=False, copy_index=True, nan='')
     logger.info("update upload page")
 
-    upload_page.update_value("H3", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
+    upload_page.update_value("J3", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
     logger.info("update time")
 
     ####################################
