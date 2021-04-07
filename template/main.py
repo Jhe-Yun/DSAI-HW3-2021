@@ -15,6 +15,8 @@ def config():
 if __name__ == "__main__":
     args = config()
 
-    with open(args.output, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["test", 1, 2, 3])
+    import pandas as pd
+    df = pd.DataFrame([["2021-01-01 00:00:00", "buy", 2.5, 3],
+                       ["2021-01-01 01:00:00", "sell", 3, 5]],
+                      columns=["time", "action", "target_price", "target_volume"])
+    df.to_csv(args.output, index=False)

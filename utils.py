@@ -1,9 +1,11 @@
+import subprocess
 import os
 import pandas as pd
 import time
 import multiprocessing as mp
 from datetime import datetime
 from loguru import logger
+from database import bid_insert
 
 
 def sync_student(upload_page, student_page):
@@ -81,41 +83,56 @@ def unzip_file(student_id, file_box):
 
 
 def execute_student_code(student_id, file_box, *args):
-    os.chdir(f"./data/code/{file_box[student_id]['filename']}/")
-    logger.debug(f"{student_id} after change path: {os.getcwd()}")
+    code_path = f"./data/code/{file_box[student_id]['filename']}/"
+    # os.chdir(f"./data/code/{file_box[student_id]['filename']}/")
+    # logger.debug(f"{student_id} after change path: {os.getcwd()}")
 
     # args_action = {
     #     "first": os.system("echo 'y' | pipenv install"),
     #     "last": os.system("pipenv --rm")
     # }
-    if args and args[0] == "first":
-        os.system("echo 'y' | pipenv install")
+    if args[0] == 0:
+        pr_env_install = subprocess.run("echo 'y' | pipenv install",
+                                        shell=True, cwd=code_path,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if pr_env_install.returncode != 0:
+            logger.error(f"{student_id} env: {pr_env_install.stderr}")
+            # write db error
+            return
         logger.success(f"{student_id} env installed")
 
-    result = os.system(f"pipenv run python main.py --consumption ../../input/consumption/1_1_1225-1231\
-                                                   --output ../../output/{file_box[student_id]['filename']}.csv")
-    if args and args[0] == "last":
-        os.system("pipenv --rm")
+    pr_run = subprocess.run(f"pipenv run python main.py --consumption ../../input/consumption/1_1_0101-0107.csv\
+                                                        --output ../../output/{file_box[student_id]['filename']}.csv",
+                            shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # logger.info(process)
+    if args[0] == len(file_box.keys())-1:
+        pr_env_del = subprocess.run("pipenv --rm", shell=True, cwd=code_path,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if pr_env_del.returncode != 0:
+            # write db error
+            logger.error(f"{student_id} env: {pr_env_install.stderr}")
+            return
         logger.success(f"{student_id} env deleted")
 
-    if result == 0:
-        logger.success(f"{student_id} code successfully executed")
-    else:
-        logger.error(f"{student_id} code have bug")
+
+    if pr_run.returncode != 0:
+        logger.error(f"{student_id} code error: {pr_run.stderr}")
+        # write db error
+        return
+    logger.success(f"{student_id} code successfully executed")
+    bid_insert(student_id, file_box[student_id]['filename'], args[0], "2021-01-01")
 
     return
 
 
 def period_transaction(file_box):
-    multi_processing(execute_student_code, file_box, "first")
-    logger.info("the first time, all student code is executed (pipenv install)")
-
-    for agent in range(1, len(file_box.keys())-1):
-        multi_processing(execute_student_code, file_box)
+    ### select agent ###
+    for agent in range(len(file_box.keys())):
+        multi_processing(execute_student_code, file_box, agent)
         logger.info(f"for the {agent} time, all student code have been executed")
+        ### for 24 round ###
 
-    multi_processing(execute_student_code, file_box, "last")
-    logger.info(f"the {len(file_box.keys())} (last) time, all student code is executed (pipenv --rm)")
 
 
 def all_bid_output(student_id):
@@ -138,8 +155,8 @@ def multi_processing(func, file_box, *args):
 
 def routine(upload_page, student_page, upload_root_path):
 
-    sync_student(upload_page, student_page)
-    logger.info("updated student ID")
+    # sync_student(upload_page, student_page)
+    # logger.info("updated student ID")
 
     col_num = len(upload_page.get_row(1, include_tailing_empty=False))
     row_num = len(upload_page.get_col(1, include_tailing_empty=False))

@@ -1,8 +1,6 @@
 import os
 import time
 import pygsheets
-import sqlite3
-from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from loguru import logger
 
@@ -14,10 +12,7 @@ def config():
     sheet = auth.open_by_url(os.getenv("sheet_url"))
     logger.info("get auth")
 
-    conn = sqlite3.connect(os.getenv("db_url"))
-    cur = conn.cursor()
-
-    return sheet, conn, cur
+    return sheet
 
 
 def get_time():
