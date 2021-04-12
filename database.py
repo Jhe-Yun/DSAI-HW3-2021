@@ -16,7 +16,6 @@ mid = 0
 def db_connect():
     conn = sqlite3.connect(os.getenv("db_url"))
     cur = conn.cursor()
-
     return conn, cur
 
 
@@ -34,7 +33,26 @@ def match_initial():
     logger.info(f"mid: {mid}")
 
     conn.close()
-    return
+    return mid
+
+
+def student_sync(df):
+    conn, cur = db_connect()
+    df.drop(["student2"], axis=1, inplace=True)
+    df.reset_index(inplace=True)
+    df.rename(columns={"student1": "sid", "last time": "last_time"}, inplace=True)
+    df.set_index("sid", inplace=True)
+    logger.info(f"upload_df: {df}")
+    try:
+        df.to_sql("student", con=conn, if_exists="append")
+        logger.success("student_sync db completed")
+        conn.close()
+        return 200
+    except Exception as e:
+        logger.error(e)
+        conn.rollback()
+        conn.close()
+        return 400
 
 
 def bid_insert(student_id, filename, agent, match_time):
@@ -58,12 +76,10 @@ def bid_insert(student_id, filename, agent, match_time):
     logger.info(f"{student_id} bids: {bids}")
     try:
         bids.to_sql("bids", con=conn, if_exists="append", index=False)
-        logger.success(f"student bids insert into db")
+        logger.success(f"{student_id} bids insert into db")
     except Exception as e:
         logger.error(e)
 
     conn.close()
-    logger.info(f"before path= {os.getcwd()}")
     os.chdir(f"../code/{filename}/")
-    logger.info(f"after path= {os.getcwd()}")
     return
