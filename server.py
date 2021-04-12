@@ -13,12 +13,12 @@ load_dotenv(dotenv_path=env_path)
 if __name__ == "__main__":
 
     sheet = config()
-    match_initial()
+    mid = match_initial()
 
     student_page = sheet.worksheet_by_title("student")
     upload_page = sheet.worksheet_by_title("upload")
 
-    routine(upload_page, student_page, os.getenv("upload_root_path"))
+    routine(mid, upload_page, student_page, os.getenv("upload_root_path"))
     logger.info("routine done")
 
     #file_manage("P76097612")
