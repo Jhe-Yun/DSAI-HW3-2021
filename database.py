@@ -3,6 +3,7 @@ import subprocess
 import sqlite3
 import pandas as pd
 from config import get_time
+from datetime import datetime, timedelta
 from loguru import logger
 from pathlib import Path
 from dotenv import load_dotenv
@@ -55,31 +56,96 @@ def student_sync(df):
         return 400
 
 
-def bid_insert(student_id, filename, agent, match_time):
+def bids_insert(student_id, filename, flag, agent, match_time):
     """
     write student bids into db
 
-    parameter:
+    Parameter:
     - student_id
     - filename
+    - flag
     - agent
-    - match_time
+    - match_time(%Y-%m-%d)
     """
 
     conn, cur = db_connect()
-    # cur.execute("")
-    os.chdir("./data/output/")
-    bids = pd.read_csv(f"./{filename}.csv")
-    ### check target_price ###
-    ### check student bid time (same date) ###
-    bids[["mid", "bidder", "status", "agent"]] = mid, student_id, "已投標", agent
-    logger.info(f"{student_id} bids: {bids}")
+    filepath = "./data/output/"
+    match_time = datetime.strptime(match_time, "%Y%m%d")
+    bids = pd.read_csv(f"{filepath}{filename}.csv")
+    logger.info(f"before filter {student_id} bids: {bids}")
+
+    # check student output file
+    bids["target_price"] = bids["target_price"].map(lambda x: float("{:.2f}".format(x)))
+    bids["target_volume"] = bids["target_volume"].map(lambda x: float("{:.2f}".format(x)))
+    bids["time"] = bids["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
+    bids = bids[(bids["time"] >= (match_time + timedelta(days=1))) & (bids["time"] < (match_time + timedelta(days=2)))]
+
+    # add column for match
+    bids[["mid", "bidder", "status", "flag", "agent"]] = mid, student_id, "已投標", flag, agent
     try:
-        bids.to_sql("bids", con=conn, if_exists="append", index=False)
-        logger.success(f"{student_id} bids insert into db")
+        if not bids.empty:
+            bids.to_sql("bids", con=conn, if_exists="append", index=False)
+            logger.success(f"{student_id} bids insert into db")
+        else:
+            logger.info(f"{student_id} bids no data")
     except Exception as e:
         logger.error(e)
 
     conn.close()
-    os.chdir(f"../code/{filename}/")
+    return
+
+
+def bids_get(mid, time, flag):
+    """
+    for match.py and bill.py
+
+    Parameter:
+    - mid
+    - time(%Y-%m-%d %H:%M:%S)
+    - flag
+    """
+
+    conn, cur = db_connect()
+    query = f'''SELECT *
+                FROM bids
+                WHERE mid = {mid} and time = '{time}' and flag = {flag}'''
+    data = pd.read_sql(query, conn)
+
+    conn.close()
+    return data
+
+
+def bids_update(buys, sells):
+    """
+    update bid status after match
+
+    Parameter:
+    - buys
+    - sells
+    """
+
+    conn, cur = db_connect()
+
+    for action in [buys, sells]:
+        for bid in action:
+            bid_value = float("{:.2f}".format(bid.value))
+            bid_price = float("{:.2f}".format(bid.price))
+
+            cur.execute('''SELECT target_volume
+                           FROM bids
+                           WHERE bid = ?''',
+                        (bid.id, ))
+            target_volume = cur.fetchone()[0]
+
+            status = ("完全成交"
+                      if target_volume == bid.value
+                      else "部分成交")
+
+            cur.execute('''UPDATE bids
+                           SET closing_price = ?, closing_volume = ?, status = ?
+                           WHERE bid = ?''',
+                        (bid_price, bid_value, status, bid.id, ))
+            conn.commit()
+
+    conn.close()
     return

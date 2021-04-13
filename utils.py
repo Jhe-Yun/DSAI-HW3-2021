@@ -8,7 +8,8 @@ import random
 import multiprocessing as mp
 from datetime import datetime, timedelta
 from loguru import logger
-from database import bid_insert, student_sync
+from database import bids_insert, student_sync
+from match import match
 
 
 def sync_student(upload_page, student_page):
@@ -120,7 +121,13 @@ def execute_student_code(student_id, file_box, *args):
         logger.error(f"{student_id} code error: {process.stderr}")
         return
     logger.success(f"{student_id} code successfully executed")
-    bid_insert(student_id, file_box[student_id]['filename'], args[0], "2021-01-01")
+    logger.info(file_box)
+
+    bids_insert(student_id,
+                file_box[student_id]["filename"],
+                file_box[student_id]["flag"],
+                file_box[student_id]["agent"],
+                "2018" + args[0][-4:])
 
     return
 
@@ -144,6 +151,9 @@ def check_student_code(df):
         )
     pr = subprocess.run(f"rm {root_path}*",
                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if pr.returncode != 0:
+        logger.error(f"{pr.stderr}")
+        return
     logger.success(f"delete student output file return_code: {pr.returncode}")
 
 
@@ -166,23 +176,28 @@ def period_transaction(file_box, upload_df):
     for flag in range(len(student_list)):
 
         start_time = datetime.strptime("2018-08-25 00:00:00", "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime("2018-08-26 00:00:00", "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime("2018-08-31 00:00:00", "%Y-%m-%d %H:%M:%S")
         while start_time < end_time:
 
             for index, student in enumerate(student_list):
+                file_box[student]["flag"] = flag
                 file_box[student]["agent"] = agent_index[(index + flag) % len(student_list)]
 
-            interval = start_time.strftime("%m%d") + "-" + (start_time + timedelta(hours=167)).strftime("%m%d")
+            interval = start_time.strftime("%m%d") + (start_time + timedelta(hours=167)).strftime("%m%d")
             multi_processing(execute_student_code, file_box, interval)
             logger.info(f"{interval}")
 
             check_student_code(upload_df)
 
+            # data = bids_get(mid, time, flag)
+            # match(data)
             ###
             # for loop
-            # match (every one hour)
+            # match.py (every one hour)
+            # bill.py (mid, time, flag)
             # wait()
             ###
+
             start_time += timedelta(days=1)
 
         logger.info(f"The {flag}th tansaction has been compeleted, with {len(student_list)} participants.")
