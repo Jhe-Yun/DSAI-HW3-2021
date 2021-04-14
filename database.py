@@ -95,21 +95,24 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     return
 
 
-def bids_get(mid, time, flag):
+def bids_get(**kwargs):
     """
     for match.py and bill.py
 
     Parameter:
-    - mid
-    - time(%Y-%m-%d %H:%M:%S)
-    - flag
+    - **kwargs
+        - time(%Y-%m-%d %H:%M:%S)
+        - flag
+        or
+        - student_id
     """
 
     conn, cur = db_connect()
+
     query = f'''SELECT *
                 FROM bids
-                WHERE mid = {mid} and time = '{time}' and flag = {flag}'''
-    data = pd.read_sql(query, conn)
+                WHERE mid = {mid} and ''' + " and ".join(param + " = :" + param for param in kwargs)
+    data = pd.read_sql(query, conn, params=kwargs)
 
     conn.close()
     return data
@@ -125,27 +128,32 @@ def bids_update(buys, sells):
     """
 
     conn, cur = db_connect()
+    trades = {trade.id: {"volume": float("{:.2f}".format(trade.value)),
+                          "price": float("{:.2f}".format(trade.price))}
+              for trade in buys+sells}
+    logger.debug(f"trades: {trades}")
 
-    for action in [buys, sells]:
-        for bid in action:
-            bid_value = float("{:.2f}".format(bid.value))
-            bid_price = float("{:.2f}".format(bid.price))
+    data = bids_get(mid=mid)
+    data.set_index("bid", inplace=True)
+    data[["trade_volume", "trade_price"]] = -1, -1
 
-            cur.execute('''SELECT target_volume
-                           FROM bids
-                           WHERE bid = ?''',
-                        (bid.id, ))
-            target_volume = cur.fetchone()[0]
+    for index, row in data.iterrows():
+        if not index in trades.keys():
+            data.at[index, "status"] = "未成交"
+            continue
+        data.at[index, "status"] = ("完全成交"
+                                    if row.target_volume == trades[index]["volume"]
+                                    else "部分成交")
+        data.loc[index, ["trade_volume", "trade_price"]] = [trades[index]["volume"], trades[index]["price"]]
 
-            status = ("完全成交"
-                      if target_volume == bid.value
-                      else "部分成交")
-
-            cur.execute('''UPDATE bids
-                           SET closing_price = ?, closing_volume = ?, status = ?
-                           WHERE bid = ?''',
-                        (bid_price, bid_value, status, bid.id, ))
-            conn.commit()
+    data.reset_index(inplace=True)
+    data = data[["trade_price", "trade_volume", "status", "bid"]]
+    cur.executemany('''UPDATE bids
+                       SET trade_price = ?, trade_volume = ?, status = ?
+                       WHERE bid = ?''',
+                    data.values.tolist())
+    conn.commit()
+    logger.success(f"success wrote data to db")
 
     conn.close()
     return
