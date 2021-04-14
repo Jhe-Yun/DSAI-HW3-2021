@@ -8,7 +8,7 @@ import random
 import multiprocessing as mp
 from datetime import datetime, timedelta
 from loguru import logger
-from database import bids_insert, student_sync
+from database import bids_insert, bids_get, student_sync
 from match import match
 
 
@@ -157,6 +157,35 @@ def check_student_code(df):
     logger.success(f"delete student output file return_code: {pr.returncode}")
 
 
+def exchange_to_csv(mid, upload_df):
+    """
+    write student bid exchange data from sql db to ./download (FTP)
+
+    Parameter:
+    - mid
+    - upload_df(dataframe)
+    """
+
+    for student_id in upload_df.index:
+        if upload_df.at[student_id, "status"] == "P":
+            data = bids_get(bidder=student_id)
+
+            dir_path = f"{os.getenv('download_url')}{student_id}"
+            file_path = f"{dir_path}/exchange-{mid}.csv"
+            if not os.path.isdir(dir_path):
+                process = subprocess.run(f"mkdir -p {dir_path}/",
+                                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if process.returncode != 0:
+                    logger.error(f"created {student_id}/ dir error")
+                    continue
+                logger.success(f"success created {student_id}/ dir")
+
+            data = data.drop(columns=["bid", "agent"])
+            data.to_csv(file_path, index=False)
+            logger.success(f"success wrote data to {file_path}")
+
+
+
 def period_transaction(file_box, upload_df):
     # # backup
     # ### select agent ###
@@ -167,6 +196,7 @@ def period_transaction(file_box, upload_df):
     #     check_student_code(upload_df)
     #     ### for 24 round ###
 
+    mid = upload_df.iat[0, -1]
     student_list = [i for i in file_box.keys()]
     agent_index = random.sample([i for i in range(50)], k=len(student_list))
     logger.info(f"agent_index: {agent_index}")
@@ -189,8 +219,11 @@ def period_transaction(file_box, upload_df):
 
             check_student_code(upload_df)
 
-            # data = bids_get(mid, time, flag)
-            # match(data)
+            for hour in range(24):
+                match_time = start_time + timedelta(hours=(7 * 24 + hour))
+                logger.info(f"match_time: {match_time}")
+                data = bids_get(time=match_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
+                match(mid, data)
             ###
             # for loop
             # match.py (every one hour)
@@ -203,6 +236,7 @@ def period_transaction(file_box, upload_df):
         logger.info(f"The {flag}th tansaction has been compeleted, with {len(student_list)} participants.")
 
     multi_processing(student_remove_env, file_box)
+    exchange_to_csv(mid, upload_df)
 
 
 def multi_processing(func, file_box, *args):
