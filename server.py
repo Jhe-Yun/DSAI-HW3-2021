@@ -17,8 +17,9 @@ if __name__ == "__main__":
 
     student_page = sheet.worksheet_by_title("student")
     upload_page = sheet.worksheet_by_title("upload")
+    info_page = sheet.worksheet_by_title("information")
 
-    routine(mid, upload_page, student_page, os.getenv("upload_root_path"))
+    routine(mid, upload_page, student_page, info_page, os.getenv("upload_root_path"))
     logger.info("routine done")
 
     #file_manage("P76097612")

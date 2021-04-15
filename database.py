@@ -95,34 +95,13 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     return
 
 
-def bids_get(**kwargs):
-    """
-    for match.py and bill.py
-
-    Parameter:
-    - **kwargs
-        - time(%Y-%m-%d %H:%M:%S)
-        - flag
-        or
-        - student_id
-    """
-
-    conn, cur = db_connect()
-
-    query = f'''SELECT *
-                FROM bids
-                WHERE mid = {mid} and ''' + " and ".join(param + " = :" + param for param in kwargs)
-    data = pd.read_sql(query, conn, params=kwargs)
-
-    conn.close()
-    return data
-
-
-def bids_update(buys, sells):
+def bids_update(time, flag, buys, sells):
     """
     update bid status after match
 
     Parameter:
+    - time
+    - flag
     - buys
     - sells
     """
@@ -133,9 +112,12 @@ def bids_update(buys, sells):
               for trade in buys+sells}
     logger.debug(f"trades: {trades}")
 
-    data = bids_get(mid=mid)
+    data = db_get("bids", time=time, flag=flag)
     data.set_index("bid", inplace=True)
-    data[["trade_volume", "trade_price"]] = -1, -1
+    data[["trade_volume", "trade_price"]] = (
+        0,
+        trades[list(trades.keys())[0]]["price"] if trades else 0
+    )
 
     for index, row in data.iterrows():
         if not index in trades.keys():
@@ -148,12 +130,55 @@ def bids_update(buys, sells):
 
     data.reset_index(inplace=True)
     data = data[["trade_price", "trade_volume", "status", "bid"]]
+    params = [bid for bid in data.itertuples(index=False, name=None)]
+    logger.debug(params)
     cur.executemany('''UPDATE bids
                        SET trade_price = ?, trade_volume = ?, status = ?
-                       WHERE bid = ?''',
-                    data.values.tolist())
+                       WHERE bid = ?''', params)
     conn.commit()
     logger.success(f"success wrote data to db")
 
     conn.close()
     return
+
+
+def bill_insert(bills):
+    """
+    insert student electricity bill by per hour
+
+    Parameter:
+
+    """
+
+    conn, cur = db_connect()
+
+    [bill.append(mid) for bill in bills]
+    logger.info(f"bills: {bills}")
+    cur.executemany('''INSERT INTO bill(flag, sid, time, money, mid)
+                       VALUES (?, ?, ?, ?, ?)''', bills)
+    conn.commit()
+    logger.success("bill success wrote to db")
+
+    conn.close()
+    return
+
+
+def db_get(table, **kwargs):
+    """
+    [Beta]
+    for bids_get() and bill_get()
+
+    Parameter:
+    - table
+    - **kwargs
+    """
+
+    conn, cur = db_connect()
+
+    query = f'''SELECT *
+                FROM {table}
+                WHERE mid = {mid} and ''' + " and ".join(param + " = :" + param for param in kwargs)
+    data = pd.read_sql(query, conn, params=kwargs)
+
+    conn.close()
+    return data

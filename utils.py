@@ -8,8 +8,9 @@ import random
 import multiprocessing as mp
 from datetime import datetime, timedelta
 from loguru import logger
-from database import bids_insert, bids_get, student_sync
+from database import bids_insert, db_get, student_sync
 from match import match
+from bill import calculate_hour_bill, calculate_total_bill_rank
 
 
 def sync_student(upload_page, student_page):
@@ -112,10 +113,10 @@ def execute_student_code(student_id, file_box, *args):
     code_path = f"./data/code/{file_box[student_id]['filename']}/"
 
     process = subprocess.run(f"pipenv run python main.py\
-                               --consumption ../../input/validation/consumption/1_{file_box[student_id]['agent']}_{args[0]}.csv\
-                               --generation ../../input/validation/generation/2_{file_box[student_id]['agent']}_{args[0]}.csv\
+                               --consumption ../../input/{os.getenv('phase')}/consumption/1_{file_box[student_id]['agent']}_{args[0]}.csv\
+                               --generation ../../input/{os.getenv('phase')}/generation/2_{file_box[student_id]['agent']}_{args[0]}.csv\
                                --output ../../output/{file_box[student_id]['filename']}.csv",
-                             shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                             shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
 
     if process.returncode != 0:
         logger.error(f"{student_id} code error: {process.stderr}")
@@ -149,12 +150,16 @@ def check_student_code(df):
             if os.path.isfile(f"{root_path}{filename}")
             else "F"
         )
+    success_num = len(df[df["status"] == "P"])
+    logger.info(f"number of success code: {success_num}")
+
     pr = subprocess.run(f"rm {root_path}*",
                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if pr.returncode != 0:
         logger.error(f"{pr.stderr}")
         return
     logger.success(f"delete student output file return_code: {pr.returncode}")
+    return success_num
 
 
 def exchange_to_csv(mid, upload_df):
@@ -168,9 +173,9 @@ def exchange_to_csv(mid, upload_df):
 
     for student_id in upload_df.index:
         if upload_df.at[student_id, "status"] == "P":
-            data = bids_get(bidder=student_id)
+            data = db_get("bids", bidder=student_id)
 
-            dir_path = f"{os.getenv('download_url')}{student_id}"
+            dir_path = f"{os.getenv('download_url')}student/{student_id}"
             file_path = f"{dir_path}/exchange-{mid}.csv"
             if not os.path.isdir(dir_path):
                 process = subprocess.run(f"mkdir -p {dir_path}/",
@@ -180,10 +185,37 @@ def exchange_to_csv(mid, upload_df):
                     continue
                 logger.success(f"success created {student_id}/ dir")
 
-            data = data.drop(columns=["bid", "agent"])
+            data.drop(columns=["bid", "agent"], inplace=True)
             data.to_csv(file_path, index=False)
             logger.success(f"success wrote data to {file_path}")
 
+
+def bill_to_csv(mid, upload_df):
+    """
+    write student electricity bill from sql db to ./download (FTP)
+
+    Parameter:
+    - mid
+    - upload_df(dataframe)
+    """
+
+    for student_id in upload_df.index:
+        data = db_get("bill", sid=student_id)
+
+        dir_path = f"{os.getenv('download_url')}student/{student_id}"
+        file_path = f"{dir_path}/bill-{mid}.csv"
+        if not os.path.isdir(dir_path):
+            process = subprocess.run(f"mkdir -p {dir_path}/",
+                                     shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"created {student_id}/ dir error")
+                continue
+            logger.success(f"success created {student_id}/ dir")
+
+        data.drop(columns=["id"], inplace=True)
+        data.rename({"sid": "bidder"}, axis=1, inplace=True)
+        data.to_csv(file_path, index=False)
+        logger.success(f"success wrote data to {file_path}")
 
 
 def period_transaction(file_box, upload_df):
@@ -197,46 +229,82 @@ def period_transaction(file_box, upload_df):
     #     ### for 24 round ###
 
     mid = upload_df.iat[0, -1]
-    student_list = [i for i in file_box.keys()]
-    agent_index = random.sample([i for i in range(50)], k=len(student_list))
+    # student_list = [i for i in file_box.keys()]
+    agent_index = random.sample([i for i in range(50)], k=len(file_box))
     logger.info(f"agent_index: {agent_index}")
 
     multi_processing(student_build_env, file_box)
 
-    for flag in range(len(student_list)):
+    for flag in range(len(file_box)):
 
         start_time = datetime.strptime("2018-08-25 00:00:00", "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime("2018-08-31 00:00:00", "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime("2018-08-27 00:00:00", "%Y-%m-%d %H:%M:%S")
         while start_time < end_time:
 
-            for index, student in enumerate(student_list):
+            for index, student in enumerate(file_box.keys()):
                 file_box[student]["flag"] = flag
-                file_box[student]["agent"] = agent_index[(index + flag) % len(student_list)]
+                file_box[student]["agent"] = agent_index[(index + flag) % len(file_box)]
 
             interval = start_time.strftime("%m%d") + (start_time + timedelta(hours=167)).strftime("%m%d")
             multi_processing(execute_student_code, file_box, interval)
             logger.info(f"{interval}")
 
-            check_student_code(upload_df)
+            ### 這個 student_num 每次可能都不同 ###
+            success_num = check_student_code(upload_df)
 
             for hour in range(24):
-                match_time = start_time + timedelta(hours=(7 * 24 + hour))
+                match_time = (start_time + timedelta(hours=(7 * 24 + hour))).strftime("%Y-%m-%d %H:%M:%S")
                 logger.info(f"match_time: {match_time}")
-                data = bids_get(time=match_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
-                match(mid, data)
-            ###
-            # for loop
-            # match.py (every one hour)
-            # bill.py (mid, time, flag)
-            # wait()
-            ###
+                match(match_time, flag)
+                calculate_hour_bill(match_time, flag, file_box, upload_df)
 
             start_time += timedelta(days=1)
 
-        logger.info(f"The {flag}th tansaction has been compeleted, with {len(student_list)} participants.")
+        logger.info(f"The {flag}th tansaction has been compeleted, with {len(file_box.keys())} participants.")
 
     multi_processing(student_remove_env, file_box)
     exchange_to_csv(mid, upload_df)
+    bill_to_csv(mid, upload_df)
+
+
+def update_information(mid, student_num):
+    """
+    update information page by bids database
+
+    Parameter:
+    - mid
+    - student_num
+    """
+
+    info_list = list()
+    for flag in range(student_num):
+
+        start_time = datetime.strptime("2018-09-01 00:00:00", "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime("2018-09-03 00:00:00", "%Y-%m-%d %H:%M:%S")
+        while start_time < end_time:
+            data = db_get("bids", time=start_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
+
+            target_buy_volume = "{:.2f}".format(sum(data[data["action"] == "buy"]["target_volume"]))
+            target_sell_volume = "{:.2f}".format(sum(data[data["action"] == "sell"]["target_volume"]))
+            target_num = len(data)
+            trade_price = -1 if data.empty else data.loc[0, "trade_price"]
+            trade_data = data[data["status"] != "未成交"]
+            trade_volume = "{:.2f}".format(sum(trade_data["trade_volume"]))
+            trade_num = len(trade_data)
+
+            info_list.append([flag, start_time,
+                              target_buy_volume, target_sell_volume, target_num,
+                              trade_price, trade_volume, trade_num])
+
+            start_time += timedelta(hours=1)
+
+    info_df = pd.DataFrame(info_list,
+                           columns=["flag", "start_time",
+                                    "target_buy_volume", "target_sell_volume", "target_num",
+                                    "trade_price", "trade_volume", "trade_num"])
+    info_df.to_csv(f"{os.getenv('download_url')}information/info-{mid}.csv", index=False)
+    logger.info("success info data to ftp")
+    return info_df
 
 
 def multi_processing(func, file_box, *args):
@@ -250,8 +318,10 @@ def multi_processing(func, file_box, *args):
         pool.join()
 
 
-def routine(mid, upload_page, student_page, upload_root_path):
-
+def routine(mid, upload_page, student_page, info_page, upload_root_path):
+    ###
+    # 記得清除上一個版本的
+    ###
     sync_student(upload_page, student_page)
     logger.info("updated student ID")
 
@@ -276,25 +346,26 @@ def routine(mid, upload_page, student_page, upload_root_path):
     period_transaction(file_box, upload_df)
     logger.info("all matchs are done")
 
+    calculate_total_bill_rank(upload_df)
+    logger.info("update all student bill and rank")
+
     upload_page.set_dataframe(upload_df.iloc[:, :-1], start="A2", copy_head=False, copy_index=True, nan='')
     logger.info("update upload page")
 
     upload_page.update_value("J3", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
     logger.info("update time")
 
+    info_df = update_information(mid, len(file_box))
+    info_page.set_dataframe(info_df, start="A2", copy_head=False, nan='')
+    logger.info("update info page")
+
+    info_page.update_value("K3", mid)
+    logger.info("update info mid")
+
+    info_page.update_value("K4", len(file_box))
+    logger.info("update info student num")
+
     status_code = student_sync(copy.deepcopy(upload_df))
     if status_code == 400:
         logger.error("db sync student error")
         return
-
-    ####################################
-    # print upload_df
-    # with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-    #     print(upload_df)
-
-    # os.path.isfile(file_path)
-    # os.system(f"sudo cp /data/dsai1092/upload/{student_id}.zip /home/netdb/dsai-server/data/{student_id}.zip")
-    # logger.info(f"cp {student_id} file")
-    # os.system(f"sudo unzip ./data/{student_id}.zip -d ./data/{student_id}/")
-    # logger.info(f"unzip {student_id} file")
-    # os.system(f"sudo rm ./data/{student_id}.zip")
