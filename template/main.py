@@ -12,11 +12,18 @@ def config():
     return parser.parse_args()
 
 
+def output(path, data):
+    import pandas as pd
+
+    df = pd.DataFrame(data, columns=["time", "action", "target_price", "target_volume"])
+    df.to_csv(path, index=False)
+
+    return
+
+
 if __name__ == "__main__":
     args = config()
 
-    import pandas as pd
-    df = pd.DataFrame([["2021-01-01 00:00:00", "buy", 2.5, 3],
-                       ["2021-01-01 01:00:00", "sell", 3, 5]],
-                      columns=["time", "action", "target_price", "target_volume"])
-    df.to_csv(args.output, index=False)
+    data = [["2018-01-01 00:00:00", "buy", 2.5, 3],
+            ["2018-01-01 01:00:00", "sell", 3, 5]]
+    output(args.consumption, args.output, data)

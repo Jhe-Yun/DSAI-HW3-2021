@@ -38,6 +38,12 @@ def file_delete(student_file_list, root_path):
                 os.system(f"echo 'y' | rm -r {temp}")
                 logger.info(f"delete file {temp}")
 
+    # delete previous server data
+    process = subprocess.run("sudo rm -r ./data/code/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if process.returncode != 0:
+        logger.error(f"delete server data error: {process.stderr}")
+    logger.success("delete server data")
+
 
 def file_manage(student_list, root_path):
     # according to student_id classification
@@ -112,13 +118,17 @@ def student_remove_env(student_id, file_box, *args):
 def execute_student_code(student_id, file_box, *args):
     code_path = f"./data/code/{file_box[student_id]['filename']}/"
 
-    process = subprocess.run(f"pipenv run python main.py\
-                               --consumption ../../input/{os.getenv('phase')}/consumption/1_{file_box[student_id]['agent']}_{args[0]}.csv\
-                               --generation ../../input/{os.getenv('phase')}/generation/2_{file_box[student_id]['agent']}_{args[0]}.csv\
-                               --output ../../output/{file_box[student_id]['filename']}.csv",
-                             shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-
-    if process.returncode != 0:
+    try:
+        process = subprocess.run(f"pipenv run python main.py\
+                                 --consumption ../../input/{os.getenv('phase')}/consumption/1_{file_box[student_id]['agent']}_{args[0]}.csv\
+                                 --generation ../../input/{os.getenv('phase')}/generation/2_{file_box[student_id]['agent']}_{args[0]}.csv\
+                                 --bidresult ../../input/bidresult/student/{student_id}/{args[0]}.csv\
+                                 --output ../../output/{file_box[student_id]['filename']}.csv",
+                                 shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+    except subprocess.TimeoutExpired:
+        logger.error(f"{student_id} code time out.")
+        return
+    except Exception as e:
         logger.error(f"{student_id} code error: {process.stderr}")
         return
     logger.success(f"{student_id} code successfully executed")
@@ -153,7 +163,7 @@ def check_student_code(df):
     success_num = len(df[df["status"] == "P"])
     logger.info(f"number of success code: {success_num}")
 
-    pr = subprocess.run(f"rm {root_path}*",
+    pr = subprocess.run(f"sudo rm {root_path}*",
                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if pr.returncode != 0:
         logger.error(f"{pr.stderr}")
@@ -162,9 +172,9 @@ def check_student_code(df):
     return success_num
 
 
-def exchange_to_csv(mid, upload_df):
+def bidresult_to_csv(mid, upload_df):
     """
-    write student bid exchange data from sql db to ./download (FTP)
+    write student bidresult data from sql db to ./download (FTP)
 
     Parameter:
     - mid
@@ -176,7 +186,7 @@ def exchange_to_csv(mid, upload_df):
             data = db_get("bids", bidder=student_id)
 
             dir_path = f"{os.getenv('download_url')}student/{student_id}"
-            file_path = f"{dir_path}/exchange-{mid}.csv"
+            file_path = f"{dir_path}/bidresult-{mid}.csv"
             if not os.path.isdir(dir_path):
                 process = subprocess.run(f"mkdir -p {dir_path}/",
                                          shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -190,43 +200,86 @@ def exchange_to_csv(mid, upload_df):
             logger.success(f"success wrote data to {file_path}")
 
 
-def bill_to_csv(mid, upload_df):
+def bill_to_csv(mid, flag_num, upload_df):
     """
     write student electricity bill from sql db to ./download (FTP)
 
     Parameter:
     - mid
+    - flag_num
     - upload_df(dataframe)
     """
 
     for student_id in upload_df.index:
         data = db_get("bill", sid=student_id)
-
-        dir_path = f"{os.getenv('download_url')}student/{student_id}"
-        file_path = f"{dir_path}/bill-{mid}.csv"
-        if not os.path.isdir(dir_path):
-            process = subprocess.run(f"mkdir -p {dir_path}/",
-                                     shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if process.returncode != 0:
-                logger.error(f"created {student_id}/ dir error")
-                continue
-            logger.success(f"success created {student_id}/ dir")
-
         data.drop(columns=["id"], inplace=True)
         data.rename({"sid": "bidder"}, axis=1, inplace=True)
-        data.to_csv(file_path, index=False)
+
+        dir_path = f"{os.getenv('download_url')}student/{student_id}/"
+        file_path = f"{dir_path}/bill-{mid}.csv"
+        if not os.path.isdir(dir_path):
+            process = subprocess.run(f"mkdir -p {dir_path}",
+                                     shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if process.returncode != 0:
+                logger.error(f"created {student_id} dir error")
+                continue
+            logger.success(f"success created {student_id} dir")
+
+        day_data = pd.DataFrame(columns=["mid", "flag", "bidder", "time", "money"])
+        for flag in range(flag_num):
+            start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
+            end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
+            while start_time < end_time:
+                temp_end_time = start_time + timedelta(days=1)
+                row = data[(data["time"] >= start_time) & (data["time"] < temp_end_time) & (data["flag"] == flag)]
+                row = pd.DataFrame([[mid, flag, student_id, start_time.strftime("%Y-%m-%d"), "{:.2f}".format(sum(row["money"]))]],
+                                   columns=["mid", "flag", "bidder", "time", "money"])
+                day_data = day_data.append(row, ignore_index=True)
+                start_time += timedelta(days=1)
+
+        day_data.to_csv(file_path, index=False)
         logger.success(f"success wrote data to {file_path}")
 
 
+def beta_bidresult_to_csv(student_id, file_box, *args):
+    """
+    per student get bidresult data from sql to csv for the past 7 days
+
+    Parameter:
+    - student_id
+    - file_box
+    - *args
+        - path
+        - interval
+        - start_time
+        - temp_end_time
+    """
+
+    data = (db_get("bids", bidder=student_id)
+            if not args[1]
+            else db_get("bids", bidder=student_id, flag=file_box[student_id]["flag"]))
+
+    dir_path = f"{os.getenv(args[0])}student/{student_id}/"
+    file_path = f"{dir_path}{args[1]}.csv"
+    if not os.path.isdir(dir_path):
+        process = subprocess.run(f"mkdir -p {dir_path}",
+                                 shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if process.returncode != 0:
+            logger.error(f"created {student_id} dir error")
+            return
+        logger.success(f"success created {student_id} dir")
+
+    # filter data by start_time and end_time
+    if args[2] and args[3]:
+        # data["time"] = data["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
+        data = data[(data["time"] >= args[2]) & (data["time"] < args[3])]
+
+    data.drop(columns=["mid", "bid", "agent", "flag"], inplace=True)
+    data.to_csv(file_path, index=False)
+    # logger.success(f"success wrote data to {file_path}")
+
+
 def period_transaction(file_box, upload_df):
-    # # backup
-    # ### select agent ###
-    # for agent in range(len(file_box.keys())):
-    #     ### for loop days ###
-    #     multi_processing(execute_student_code, file_box, agent)
-    #     logger.info(f"for the {agent} time, all student code have been executed")
-    #     check_student_code(upload_df)
-    #     ### for 24 round ###
 
     mid = upload_df.iat[0, -1]
     # student_list = [i for i in file_box.keys()]
@@ -237,15 +290,20 @@ def period_transaction(file_box, upload_df):
 
     for flag in range(len(file_box)):
 
-        start_time = datetime.strptime("2018-08-25 00:00:00", "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime("2018-08-27 00:00:00", "%Y-%m-%d %H:%M:%S")
+        start_time = datetime.strptime(os.getenv("trans_start_time"), "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime(os.getenv("trans_end_time"), "%Y-%m-%d %H:%M:%S")
         while start_time < end_time:
 
             for index, student in enumerate(file_box.keys()):
                 file_box[student]["flag"] = flag
                 file_box[student]["agent"] = agent_index[(index + flag) % len(file_box)]
 
-            interval = start_time.strftime("%m%d") + (start_time + timedelta(hours=167)).strftime("%m%d")
+            temp_end_time = start_time + timedelta(hours=167)
+            interval = start_time.strftime("%m%d") + temp_end_time.strftime("%m%d")
+
+            # generate bidresult data
+            multi_processing(beta_bidresult_to_csv, file_box, "input_bidresult_url", interval, start_time, temp_end_time)
+
             multi_processing(execute_student_code, file_box, interval)
             logger.info(f"{interval}")
 
@@ -263,8 +321,8 @@ def period_transaction(file_box, upload_df):
         logger.info(f"The {flag}th tansaction has been compeleted, with {len(file_box.keys())} participants.")
 
     multi_processing(student_remove_env, file_box)
-    exchange_to_csv(mid, upload_df)
-    bill_to_csv(mid, upload_df)
+    bidresult_to_csv(mid, upload_df)
+    bill_to_csv(mid, len(file_box), upload_df)
 
 
 def update_information(mid, student_num):
@@ -279,8 +337,8 @@ def update_information(mid, student_num):
     info_list = list()
     for flag in range(student_num):
 
-        start_time = datetime.strptime("2018-09-01 00:00:00", "%Y-%m-%d %H:%M:%S")
-        end_time = datetime.strptime("2018-09-03 00:00:00", "%Y-%m-%d %H:%M:%S")
+        start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
+        end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
         while start_time < end_time:
             data = db_get("bids", time=start_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
 
