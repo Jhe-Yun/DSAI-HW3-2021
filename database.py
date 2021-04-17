@@ -37,6 +37,17 @@ def match_initial():
     return mid
 
 
+def match_update(time):
+
+    conn, cur = db_connect()
+    cur.execute(f'''UPDATE match
+                    SET execute_time = {time}
+                    WHERE mid = {mid}''')
+    conn.commit()
+    conn.close()
+    return
+
+
 def student_sync(df):
     conn, cur = db_connect()
     df.drop(["student2"], axis=1, inplace=True)
@@ -116,7 +127,7 @@ def bids_update(time, flag, buys, sells):
     data.set_index("bid", inplace=True)
     data[["trade_volume", "trade_price"]] = (
         0,
-        trades[list(trades.keys())[0]]["price"] if trades else 0
+        trades[list(trades.keys())[0]]["price"] if trades else -1
     )
 
     for index, row in data.iterrows():
@@ -179,6 +190,7 @@ def db_get(table, **kwargs):
                 FROM {table}
                 WHERE mid = {mid} and ''' + " and ".join(param + " = :" + param for param in kwargs)
     data = pd.read_sql(query, conn, params=kwargs)
+    data["time"] = data["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
 
     conn.close()
     return data

@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import random
 from loguru import logger
@@ -23,9 +24,14 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
 
     for student_id in upload_df.index:
         money = 0
-        agent = (file_box[student_id]["agent"]
-                if student_id in file_box.keys() # 至少有傳檔案上來 (有分配到 agent)
-                else random.randint(0, 49))      # 一開始就沒傳檔案 (沒有 agent)
+        if student_id in file_box.keys():
+            agent = file_box[student_id]["agent"]
+        else:
+            # logger.info(f"{student_id} no bills")
+            continue
+        # agent = (file_box[student_id]["agent"]
+        #         if student_id in file_box.keys() # 至少有傳檔案上來 (有分配到 agent)
+        #         else random.randint(0, 49))      # 一開始就沒傳檔案 (沒有 agent)
 
         # truth data
         truth_path = f"{os.getenv('truth_url')}{os.getenv('phase')}/target{agent}.csv"
@@ -35,7 +41,6 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
         # exchage data
         bids = exchange_data[(exchange_data["status"] != "未成交") &
                              (exchange_data["bidder"] == student_id)].reset_index()
-        logger.info(bids)
 
         volume = 0
         if not bids.empty:
@@ -53,9 +58,8 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
                 money += (volume * taipower * (-1))
 
         money = float("{:.2f}".format(money))
-        logger.info([flag, student_id, time, money])
-        ### 可以考慮 0 不要 insert
-        bills.append([flag, student_id, time, money])
+        if money != 0:
+            bills.append([flag, student_id, time, money])
 
     bill_insert(bills)
 
@@ -70,7 +74,10 @@ def calculate_total_bill_rank(upload_df):
 
     for student_id in upload_df.index:
         data = db_get("bill", sid=student_id)
-        upload_df.at[student_id, "bill"] = float("{:.2f}".format(sum(data["money"])))
+        bill = (float("{:.2f}".format(sum(data["money"])))
+                if not data.empty
+                else sys.maxsize)
+        upload_df.at[student_id, "bill"] = bill
 
         # rank
         upload_df["rank"] = upload_df["bill"].rank(method="min", ascending=True)
