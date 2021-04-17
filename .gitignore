@@ -4,7 +4,6 @@ data/
 private/
 db/
 
-match.py
 develop_match.py
 dsai-autobot.sh
 
