@@ -36,7 +36,7 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
         # truth data
         truth_path = f"{os.getenv('truth_url')}{os.getenv('phase')}/target{agent}.csv"
         truth_data = pd.read_csv(truth_path, header=None, index_col=0)
-        consumption, generation = truth_data.loc[time, :]
+        generation, consumption = truth_data.loc[time, :]
 
         # exchage data
         bids = exchange_data[(exchange_data["status"] != "未成交") &
