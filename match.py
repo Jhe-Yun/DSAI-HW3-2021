@@ -279,7 +279,6 @@ def match(match_time, flag):
     # buy [10, 30, 20, 15, 10], [70, 55, 30, 25, 10]);
 
     data = db_get("bids", time=match_time, flag=flag)
-    logger.info(data)
 
     buys, sells = ([
             Bid(id=row.bid, action=row.action, value=row.target_volume, price=row.target_price, bidder=row.bidder)

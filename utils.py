@@ -39,10 +39,16 @@ def file_delete(student_file_list, root_path):
                 logger.info(f"delete file {temp}")
 
     # delete previous server data
-    process = subprocess.run("sudo rm -r ./data/code/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.run("rm -r ./data/code/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if process.returncode != 0:
-        logger.error(f"delete server data error: {process.stderr}")
-    logger.success("delete server data")
+        logger.error(f"delete server code data error: {process.stderr}")
+    logger.success("delete server code data")
+
+    # delete bidresult by past 7 days
+    process = subprocess.run("rm -r ./data/input/bidresult/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if process.returncode != 0:
+        logger.error(f"delete server bidresult error: {process.stderr}")
+    logger.success("delete server bidresult data")
 
 
 def file_manage(student_list, root_path):
@@ -188,12 +194,7 @@ def bidresult_to_csv(mid, upload_df):
             dir_path = f"{os.getenv('download_url')}student/{student_id}"
             file_path = f"{dir_path}/bidresult-{mid}.csv"
             if not os.path.isdir(dir_path):
-                process = subprocess.run(f"mkdir -p {dir_path}/",
-                                         shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if process.returncode != 0:
-                    logger.error(f"created {student_id}/ dir error")
-                    continue
-                logger.success(f"success created {student_id}/ dir")
+                process = os.makedirs(f"{dir_path}")
 
             data.drop(columns=["bid", "agent"], inplace=True)
             data.to_csv(file_path, index=False)
@@ -211,34 +212,30 @@ def bill_to_csv(mid, flag_num, upload_df):
     """
 
     for student_id in upload_df.index:
-        data = db_get("bill", sid=student_id)
-        data.drop(columns=["id"], inplace=True)
-        data.rename({"sid": "bidder"}, axis=1, inplace=True)
+        if upload_df.at[student_id, "status"] == "P":
+            data = db_get("bill", sid=student_id)
+            data.drop(columns=["id"], inplace=True)
+            data.rename({"sid": "bidder"}, axis=1, inplace=True)
 
-        dir_path = f"{os.getenv('download_url')}student/{student_id}/"
-        file_path = f"{dir_path}/bill-{mid}.csv"
-        if not os.path.isdir(dir_path):
-            process = subprocess.run(f"mkdir -p {dir_path}",
-                                     shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if process.returncode != 0:
-                logger.error(f"created {student_id} dir error")
-                continue
-            logger.success(f"success created {student_id} dir")
+            dir_path = f"{os.getenv('download_url')}student/{student_id}/"
+            file_path = f"{dir_path}/bill-{mid}.csv"
+            if not os.path.isdir(dir_path):
+                process = os.makedirs(f"{dir_path}")
 
-        day_data = pd.DataFrame(columns=["mid", "flag", "bidder", "time", "money"])
-        for flag in range(flag_num):
-            start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
-            end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
-            while start_time < end_time:
-                temp_end_time = start_time + timedelta(days=1)
-                row = data[(data["time"] >= start_time) & (data["time"] < temp_end_time) & (data["flag"] == flag)]
-                row = pd.DataFrame([[mid, flag, student_id, start_time.strftime("%Y-%m-%d"), "{:.2f}".format(sum(row["money"]))]],
-                                   columns=["mid", "flag", "bidder", "time", "money"])
-                day_data = day_data.append(row, ignore_index=True)
-                start_time += timedelta(days=1)
+            day_data = pd.DataFrame(columns=["mid", "flag", "bidder", "time", "money"])
+            for flag in range(flag_num):
+                start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
+                end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
+                while start_time < end_time:
+                    temp_end_time = start_time + timedelta(days=1)
+                    row = data[(data["time"] >= start_time) & (data["time"] < temp_end_time) & (data["flag"] == flag)]
+                    row = pd.DataFrame([[mid, flag, student_id, start_time.strftime("%Y-%m-%d"), "{:.2f}".format(sum(row["money"]))]],
+                                    columns=["mid", "flag", "bidder", "time", "money"])
+                    day_data = day_data.append(row, ignore_index=True)
+                    start_time += timedelta(days=1)
 
-        day_data.to_csv(file_path, index=False)
-        logger.success(f"success wrote data to {file_path}")
+            day_data.to_csv(file_path, index=False)
+            logger.success(f"success wrote data to {file_path}")
 
 
 def beta_bidresult_to_csv(student_id, file_box, *args):
@@ -262,21 +259,16 @@ def beta_bidresult_to_csv(student_id, file_box, *args):
     dir_path = f"{os.getenv(args[0])}student/{student_id}/"
     file_path = f"{dir_path}{args[1]}.csv"
     if not os.path.isdir(dir_path):
-        process = subprocess.run(f"mkdir -p {dir_path}",
-                                 shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if process.returncode != 0:
-            logger.error(f"created {student_id} dir error")
-            return
-        logger.success(f"success created {student_id} dir")
+        process = os.makedirs(f"{dir_path}")
 
     # filter data by start_time and end_time
     if args[2] and args[3]:
         # data["time"] = data["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
         data = data[(data["time"] >= args[2]) & (data["time"] < args[3])]
 
-    data.drop(columns=["mid", "bid", "agent", "flag"], inplace=True)
+    data.drop(columns=["bid", "agent"], inplace=True)
     data.to_csv(file_path, index=False)
-    # logger.success(f"success wrote data to {file_path}")
+    logger.success(f"success wrote data to {file_path}")
 
 
 def period_transaction(file_box, upload_df):
@@ -377,9 +369,7 @@ def multi_processing(func, file_box, *args):
 
 
 def routine(mid, upload_page, student_page, info_page, upload_root_path):
-    ###
-    # 記得清除上一個版本的
-    ###
+
     sync_student(upload_page, student_page)
     logger.info("updated student ID")
 
