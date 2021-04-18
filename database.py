@@ -83,7 +83,10 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     filepath = "./data/output/"
     match_time = datetime.strptime(match_time, "%Y%m%d")
     bids = pd.read_csv(f"{filepath}{filename}.csv")
-    logger.info(f"before filter {student_id} bids: {bids}")
+    if len(bids) > 100:
+        conn.close()
+        logger.error(f"{student_id} output csv length exceed the limit")
+        return
 
     # check student output file
     bids["target_price"] = bids["target_price"].map(lambda x: float("{:.2f}".format(x)))
