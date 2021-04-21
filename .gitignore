@@ -8,3 +8,7 @@ develop_match.py
 dsai-autobot.sh
 
 test.py
+
+account/*.sh
+account/data.csv
+account/info.csv
