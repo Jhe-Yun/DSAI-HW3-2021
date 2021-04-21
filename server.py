@@ -21,8 +21,8 @@ if __name__ == "__main__":
     upload_page = sheet.worksheet_by_title("upload")
     info_page = sheet.worksheet_by_title("information")
 
-    routine(mid, upload_page, student_page, info_page, os.getenv("upload_root_path"))
+    success_num = routine(mid, upload_page, student_page, info_page, os.getenv("upload_root_path"))
     server_end_time = time()
     server_execute_time = float('{:.2f}'.format((server_end_time - server_start_time) / 60))
-    match_update(server_execute_time)
-    logger.info(f"code execute time: {server_execute_time}")
+    match_update(server_execute_time, success_num)
+    logger.info(f"code execute time: {server_execute_time}, agent_num: {success_num}")

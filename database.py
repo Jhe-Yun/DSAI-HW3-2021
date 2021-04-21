@@ -37,11 +37,11 @@ def match_initial():
     return mid
 
 
-def match_update(time):
+def match_update(time, num):
 
     conn, cur = db_connect()
     cur.execute(f'''UPDATE match
-                    SET execute_time = {time}
+                    SET execute_time = {time}, agent_num = {num}
                     WHERE mid = {mid}''')
     conn.commit()
     conn.close()
@@ -86,13 +86,21 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     if len(bids) > 100:
         conn.close()
         logger.error(f"{student_id} output csv length exceed the limit")
+        conn.close()
         return
 
     # check student output file
     bids["target_price"] = bids["target_price"].map(lambda x: float("{:.2f}".format(x)))
     bids["target_volume"] = bids["target_volume"].map(lambda x: float("{:.2f}".format(x)))
-    bids["time"] = bids["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
-    bids = bids[(bids["time"] >= (match_time + timedelta(days=1))) & (bids["time"] < (match_time + timedelta(days=2)))]
+
+    try:
+        bids["time"] = bids["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
+        bids = bids[(bids["time"] >= (match_time + timedelta(days=1))) & (bids["time"] < (match_time + timedelta(days=2)))]
+        bids["time"] = bids["time"].map(lambda x: x.strftime("%Y-%m-%d %H:00:00"))
+    except Exception as e:
+        logger.error(f"{student_id} bids data time error.")
+        conn.close()
+        return
 
     # add column for match
     bids[["mid", "bidder", "status", "flag", "agent"]] = mid, student_id, "已投標", flag, agent

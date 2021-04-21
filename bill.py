@@ -24,7 +24,7 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
 
     for student_id in upload_df.index:
         money = 0
-        if student_id in file_box.keys():
+        if student_id in file_box.keys() and upload_df.at[student_id, "status"] == "P":
             agent = file_box[student_id]["agent"]
         else:
             # logger.info(f"{student_id} no bills")

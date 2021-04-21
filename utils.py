@@ -1,10 +1,11 @@
 import subprocess
 import os
 import re
-import pandas as pd
+import shutil
 import time
 import copy
 import random
+import pandas as pd
 import multiprocessing as mp
 from datetime import datetime, timedelta
 from loguru import logger
@@ -39,16 +40,13 @@ def file_delete(student_file_list, root_path):
                 logger.info(f"delete file {temp}")
 
     # delete previous server data
-    process = subprocess.run("rm -r ./data/code/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if process.returncode != 0:
-        logger.error(f"delete server code data error: {process.stderr}")
-    logger.success("delete server code data")
-
-    # delete bidresult by past 7 days
-    process = subprocess.run("rm -r ./data/input/bidresult/*", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if process.returncode != 0:
-        logger.error(f"delete server bidresult error: {process.stderr}")
-    logger.success("delete server bidresult data")
+    try:
+        shutil.rmtree("./data/code/*")
+        shutil.rmtree("./data/input/bidresult/*")
+    except OSError as e:
+        logger.error(f"delete file error: {e}")
+    else:
+        logger.success("delete server data")
 
 
 def file_manage(student_list, root_path):
@@ -169,12 +167,11 @@ def check_student_code(df):
     success_num = len(df[df["status"] == "P"])
     logger.info(f"number of success code: {success_num}")
 
-    pr = subprocess.run(f"sudo rm {root_path}*",
-                        shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if pr.returncode != 0:
-        logger.error(f"{pr.stderr}")
-        return
-    logger.success(f"delete student output file return_code: {pr.returncode}")
+    try:
+        shutil.rmtree(f"{root_path}*")
+    except OSError as e:
+        logger.error(f"remove outputfile error: {e}")
+    logger.success(f"delete student output file")
     return success_num
 
 
@@ -196,7 +193,7 @@ def bidresult_to_csv(mid, upload_df):
             if not os.path.isdir(dir_path):
                 process = os.makedirs(f"{dir_path}")
 
-            data.drop(columns=["bid", "agent"], inplace=True)
+            data.drop(columns=["bid", "agent", "mid", "bidder"], inplace=True)
             data.to_csv(file_path, index=False)
             logger.success(f"success wrote data to {file_path}")
 
@@ -222,15 +219,15 @@ def bill_to_csv(mid, flag_num, upload_df):
             if not os.path.isdir(dir_path):
                 process = os.makedirs(f"{dir_path}")
 
-            day_data = pd.DataFrame(columns=["mid", "flag", "bidder", "time", "money"])
+            day_data = pd.DataFrame(columns=["flag", "time", "money"])
             for flag in range(flag_num):
                 start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
                 end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
                 while start_time < end_time:
                     temp_end_time = start_time + timedelta(days=1)
                     row = data[(data["time"] >= start_time) & (data["time"] < temp_end_time) & (data["flag"] == flag)]
-                    row = pd.DataFrame([[mid, flag, student_id, start_time.strftime("%Y-%m-%d"), "{:.2f}".format(sum(row["money"]))]],
-                                    columns=["mid", "flag", "bidder", "time", "money"])
+                    row = pd.DataFrame([[flag, start_time.strftime("%Y-%m-%d"), "{:.2f}".format(sum(row["money"]))]],
+                                    columns=["flag", "time", "money"])
                     day_data = day_data.append(row, ignore_index=True)
                     start_time += timedelta(days=1)
 
@@ -266,7 +263,7 @@ def beta_bidresult_to_csv(student_id, file_box, *args):
         # data["time"] = data["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
         data = data[(data["time"] >= args[2]) & (data["time"] < args[3])]
 
-    data.drop(columns=["bid", "agent"], inplace=True)
+    data.drop(columns=["bid", "agent", "mid", "bidder", "flag"], inplace=True)
     data.to_csv(file_path, index=False)
     logger.success(f"success wrote data to {file_path}")
 
@@ -274,7 +271,7 @@ def beta_bidresult_to_csv(student_id, file_box, *args):
 def period_transaction(file_box, upload_df):
 
     mid = upload_df.iat[0, -1]
-    # student_list = [i for i in file_box.keys()]
+    success_num = 0
     agent_index = random.sample([i for i in range(50)], k=len(file_box))
     logger.info(f"agent_index: {agent_index}")
 
@@ -310,11 +307,13 @@ def period_transaction(file_box, upload_df):
 
             start_time += timedelta(days=1)
 
-        logger.info(f"The {flag}th tansaction has been compeleted, with {len(file_box.keys())} participants.")
+        logger.info(f"The {flag}th tansaction has been compeleted, with {success_num} participants.")
 
     multi_processing(student_remove_env, file_box)
     bidresult_to_csv(mid, upload_df)
     bill_to_csv(mid, len(file_box), upload_df)
+
+    return success_num
 
 
 def update_information(mid, student_num):
@@ -391,7 +390,7 @@ def routine(mid, upload_page, student_page, info_page, upload_root_path):
     multi_processing(unzip_file, file_box)
     logger.info("unzip all student file")
 
-    period_transaction(file_box, upload_df)
+    success_num = period_transaction(file_box, upload_df)
     logger.info("all matchs are done")
 
     calculate_total_bill_rank(upload_df)
@@ -410,10 +409,11 @@ def routine(mid, upload_page, student_page, info_page, upload_root_path):
     info_page.update_value("K3", mid)
     logger.info("update info mid")
 
-    info_page.update_value("K4", len(file_box))
-    logger.info("update info student num")
+    info_page.update_value("K4", success_num)
+    logger.info(f"update info student num: {success_num}")
 
     status_code = student_sync(copy.deepcopy(upload_df))
     if status_code == 400:
         logger.error("db sync student error")
-        return
+
+    return success_num
