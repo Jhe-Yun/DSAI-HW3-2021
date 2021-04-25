@@ -20,8 +20,9 @@ if __name__ == "__main__":
     student_page = sheet.worksheet_by_title("student")
     upload_page = sheet.worksheet_by_title("upload")
     info_page = sheet.worksheet_by_title("information")
+    history_page = sheet.worksheet_by_title("history")
 
-    success_num = routine(mid, upload_page, student_page, info_page, os.getenv("upload_root_path"))
+    success_num = routine(mid, upload_page, student_page, info_page, history_page, os.getenv("upload_root_path"))
     server_end_time = time()
     server_execute_time = float('{:.2f}'.format((server_end_time - server_start_time) / 60))
     match_update(server_execute_time, success_num)

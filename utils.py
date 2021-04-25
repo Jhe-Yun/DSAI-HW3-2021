@@ -15,10 +15,11 @@ from match import match
 from bill import calculate_hour_bill, calculate_total_bill_rank
 
 
-def sync_student(upload_page, student_page):
+def sync_student(upload_page, history_page, student_page):
     row_num = len(student_page.get_col(1, include_tailing_empty=False))
     data = student_page.get_values((2, 1), (row_num, 2))
     upload_page.update_values(crange=(2, 1), values=data)
+    history_page.update_values(crange=(2, 1), values=data)
 
 
 def sync_upload_page(df, file_box):
@@ -381,6 +382,21 @@ def update_information(mid, student_num):
     return info_df
 
 
+def update_history(history_page, mid, rank_series):
+    """
+    insert new rank record to history_page
+
+    Parameter:
+    - history_page
+    - mid
+    - rank_series
+    """
+    data = rank_series.tolist()
+    data.insert(0, "mid-" + str(mid))
+    col_num = len(history_page.get_row(1, include_tailing_empty=False))
+    history_page.insert_cols(col=col_num, number=1, values=data)
+
+
 def multi_processing(func, file_box, *args):
     with mp.Pool(mp.cpu_count()-2) as pool:
         for student_id in file_box.keys():
@@ -392,12 +408,12 @@ def multi_processing(func, file_box, *args):
         pool.join()
 
 
-def routine(mid, upload_page, student_page, info_page, upload_root_path):
+def routine(mid, upload_page, student_page, info_page, history_page, upload_root_path):
 
     info_page.clear(start="A2", end="H40000")
     upload_page.clear(start="A2", end="G100")
 
-    sync_student(upload_page, student_page)
+    sync_student(upload_page, history_page, student_page)
     logger.info("updated student ID")
 
     col_num = len(upload_page.get_row(1, include_tailing_empty=False))
@@ -441,6 +457,9 @@ def routine(mid, upload_page, student_page, info_page, upload_root_path):
 
     info_page.update_value("K4", success_num)
     logger.info(f"update info student num: {success_num}")
+
+    update_history(history_page, mid, upload_df["rank"])
+    logger.info("update history page")
 
     status_code = student_sync(copy.deepcopy(upload_df))
     if status_code == 400:
