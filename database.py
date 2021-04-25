@@ -132,7 +132,7 @@ def bids_update(time, flag, buys, sells):
     trades = {trade.id: {"volume": float("{:.2f}".format(trade.value)),
                           "price": float("{:.2f}".format(trade.price))}
               for trade in buys+sells}
-    logger.debug(f"trades: {trades}")
+    # logger.debug(f"trades: {trades}")
 
     data = db_get("bids", time=time, flag=flag)
     data.set_index("bid", inplace=True)
@@ -175,7 +175,7 @@ def bill_insert(bills):
     conn, cur = db_connect()
 
     [bill.append(mid) for bill in bills]
-    logger.info(f"bills: {bills}")
+    # logger.info(f"bills: {bills}")
     cur.executemany('''INSERT INTO bill(flag, sid, time, money, mid)
                        VALUES (?, ?, ?, ?, ?)''', bills)
     conn.commit()

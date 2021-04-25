@@ -5,6 +5,7 @@ import shutil
 import time
 import copy
 import random
+import zipfile
 import pandas as pd
 import multiprocessing as mp
 from datetime import datetime, timedelta
@@ -31,25 +32,35 @@ def sync_upload_page(df, file_box):
             )
 
 
-def file_delete(student_file_list, root_path):
+def file_delete(file_box, root_path):
+    # delete sftp old data
+    student_file_list = [file_box[index]["path"] for index in file_box.keys()]
     for root, dirs, files in os.walk(root_path):
         for filename in files:
             temp = os.path.join(root, filename)
             if not temp in student_file_list:
-                os.system(f"echo 'y' | rm -r {temp}")
-                logger.info(f"delete file {temp}")
+                try:
+                    os.remove(f"{temp}")
+                    logger.info(f"delete file {temp}")
+                except Exception as e:
+                    logger.error(e)
 
     # delete previous server data
-    try:
-        shutil.rmtree("./data/code/*")
-        shutil.rmtree("./data/input/bidresult/*")
-    except OSError as e:
-        logger.error(f"delete file error: {e}")
-    else:
-        logger.success("delete server data")
+    student_file_list = [file_box[index]["filename"].split(".zip")[0] for index in file_box.keys()]
+    logger.info(student_file_list)
+    data_path = "./data/code/"
+    for dirname in os.listdir(data_path):
+        logger.info(dirname)
+        if not dirname in student_file_list:
+            try:
+                shutil.rmtree(f"{data_path}{dirname}")
+                logger.info(f"delete file {data_path}{dirname}")
+            except OSError as e:
+                logger.error(e)
 
 
 def file_manage(student_list, root_path):
+
     # according to student_id classification
     file_box = dict()
     for root, dirs, files in os.walk(root_path):
@@ -59,6 +70,10 @@ def file_manage(student_list, root_path):
                 temp = (temp[0].split(".")[0] + "-1" + temp[0].split(".")[1]).split('-')
 
             temp[0] = temp[0].upper()
+            # delete student_id when not exist in list
+            if not temp[0] in student_list:
+                logger.error(f"{temp[0]} not in student_list")
+                continue
             file_box[temp[0]] = file_box.get(temp[0], {"version": list(), "path": list(), "filename": list()})
             temp[1] = float(re.findall(r"\d+\.?\d*", temp[1])[0])
             file_box[temp[0]]["version"].append(temp[1])
@@ -67,9 +82,6 @@ def file_manage(student_list, root_path):
 
     # each student leaves a file
     for index in file_box.keys():
-        # delete student_id when not exist in list
-        if not index in student_list:
-            del file_box[index]
         # select file max version
         pre = file_box[index]
         latest_index = pre["version"].index(max(pre["version"]))
@@ -79,7 +91,7 @@ def file_manage(student_list, root_path):
         logger.info(f"student: {index}, max_version: {pre['version']}, path: {pre['path']}, filename: {pre['filename']}")
 
     # delete unnecessary files
-    file_delete([file_box[index]["path"] for index in file_box.keys()], root_path)
+    file_delete(file_box, root_path)
 
     return file_box
 
@@ -88,7 +100,9 @@ def unzip_file(student_id, file_box):
     try:
         server_file_path = f"./data/code/{file_box[student_id]['filename']}"
         if not os.path.isdir(server_file_path):
-            os.system(f"sudo unzip {file_box[student_id]['path']} -d {server_file_path}")
+            student_zip =  zipfile.ZipFile(file_box[student_id]["path"], "r")
+            for name in student_zip.namelist():
+                student_zip.extract(name, server_file_path)
             logger.info(f"success unzip {file_box[student_id]['filename']} file")
         else:
             logger.error(f"{file_box[student_id]['filename']} exist")
@@ -120,6 +134,12 @@ def student_remove_env(student_id, file_box, *args):
 
 
 def execute_student_code(student_id, file_box, *args):
+
+    if args[1].at[student_id] == "F" and (file_box[student_id]["flag"] != 0 or args[0] != os.getenv("trans_first_interval")):
+        logger.info(f"{student_id} code error")
+        return
+    logger.info(f"flag= {file_box[student_id]['flag']}, interval= {args[0]}, status= {args[1].at[student_id]}")
+
     code_path = f"./data/code/{file_box[student_id]['filename']}/"
 
     try:
@@ -136,7 +156,7 @@ def execute_student_code(student_id, file_box, *args):
         logger.error(f"{student_id} code error: {process.stderr}")
         return
     logger.success(f"{student_id} code successfully executed")
-    logger.info(file_box)
+    # logger.info(file_box)
 
     bids_insert(student_id,
                 file_box[student_id]["filename"],
@@ -168,7 +188,8 @@ def check_student_code(df):
     logger.info(f"number of success code: {success_num}")
 
     try:
-        shutil.rmtree(f"{root_path}*")
+        shutil.rmtree(f"{root_path}")
+        os.makedirs(f"{root_path}")
     except OSError as e:
         logger.error(f"remove outputfile error: {e}")
     logger.success(f"delete student output file")
@@ -293,7 +314,7 @@ def period_transaction(file_box, upload_df):
             # generate bidresult data
             multi_processing(beta_bidresult_to_csv, file_box, "input_bidresult_url", interval, start_time, temp_end_time)
 
-            multi_processing(execute_student_code, file_box, interval)
+            multi_processing(execute_student_code, file_box, interval, upload_df.loc[:, "status"])
             logger.info(f"{interval}")
 
             ### 這個 student_num 每次可能都不同 ###
@@ -305,6 +326,10 @@ def period_transaction(file_box, upload_df):
                 match(match_time, flag)
                 calculate_hour_bill(match_time, flag, file_box, upload_df)
 
+            ###
+            # if upload_df.loc[student_id, "status"] != "P"
+            #     del file_box[student_id]
+            ###
             start_time += timedelta(days=1)
 
         logger.info(f"The {flag}th tansaction has been compeleted, with {success_num} participants.")
@@ -369,6 +394,9 @@ def multi_processing(func, file_box, *args):
 
 def routine(mid, upload_page, student_page, info_page, upload_root_path):
 
+    info_page.clear(start="A2", end="H40000")
+    upload_page.clear(start="A2", end="G100")
+
     sync_student(upload_page, student_page)
     logger.info("updated student ID")
 
@@ -378,7 +406,7 @@ def routine(mid, upload_page, student_page, info_page, upload_root_path):
                                       end=(row_num, col_num),
                                       numerize=False,
                                       include_tailing_empty=False)
-    upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
+    # upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
     upload_df.loc[:, "mid"] = mid
     logger.info("get upload page")
 
@@ -403,7 +431,9 @@ def routine(mid, upload_page, student_page, info_page, upload_root_path):
     logger.info("update time")
 
     info_df = update_information(mid, len(file_box))
-    info_page.set_dataframe(info_df, start="A2", copy_head=False, nan='')
+    if not info_df.empty:
+        info_page.set_dataframe(info_df, start="A2", copy_head=False, nan='')
+        logger.info("info page no data")
     logger.info("update info page")
 
     info_page.update_value("K3", mid)

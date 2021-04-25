@@ -49,13 +49,10 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
             volume = sum(buys["trade_volume"]) - sum(sells["trade_volume"]) + generation
             money += (((volume - generation) * bids.at[0, "trade_price"])
                       if volume >= 0
-                      else (volume * taipower * (-1)))
+                      else (generation * bids.at[0, "trade_price"] * (-1)))
+        volume -= consumption
         if volume < 0:
-            money += (consumption * taipower)
-        else:
-            volume -= consumption
-            if volume < 0:
-                money += (volume * taipower * (-1))
+            money += (volume * taipower * (-1))
 
         money = float("{:.2f}".format(money))
         if money != 0:
