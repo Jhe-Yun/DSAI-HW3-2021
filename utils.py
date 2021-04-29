@@ -51,7 +51,7 @@ def file_delete(file_box, root_path):
     logger.info(student_file_list)
     data_path = "./data/code/"
     for dirname in os.listdir(data_path):
-        logger.info(dirname)
+        # logger.info(dirname)
         if not dirname in student_file_list:
             try:
                 shutil.rmtree(f"{data_path}{dirname}")
@@ -99,14 +99,15 @@ def file_manage(student_list, root_path):
 
 def unzip_file(student_id, file_box):
     try:
-        server_file_path = f"./data/code/{file_box[student_id]['filename']}"
-        if not os.path.isdir(server_file_path):
-            student_zip =  zipfile.ZipFile(file_box[student_id]["path"], "r")
+        server_file_path = "./data/code/"
+        # logger.info(os.path.join(server_file_path, file_box[student_id]['filename']))
+        if not os.path.isdir(os.path.join(server_file_path, file_box[student_id]['filename'])):
+            student_zip = zipfile.ZipFile(file_box[student_id]["path"], "r")
             for name in student_zip.namelist():
                 student_zip.extract(name, server_file_path)
             logger.info(f"success unzip {file_box[student_id]['filename']} file")
         else:
-            logger.error(f"{file_box[student_id]['filename']} exist")
+            logger.error(f"{file_box[student_id]['filename']} file exist")
     except Exception as e:
         logger.error(e)
 
@@ -144,7 +145,11 @@ def execute_student_code(student_id, file_box, *args):
     code_path = f"./data/code/{file_box[student_id]['filename']}/"
 
     try:
-        process = subprocess.run(f"pipenv run python main.py\
+        get_venv = subprocess.run("pipenv --venv",
+                                 shell=True, cwd=code_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        python_path = get_venv.stdout.decode("utf-8").split("\n")[0] + "/bin/python3"
+        # logger.info(python_path)
+        process = subprocess.run(f"pipenv run {python_path} main.py\
                                  --consumption ../../input/{os.getenv('phase')}/consumption/1_{file_box[student_id]['agent']}_{args[0]}.csv\
                                  --generation ../../input/{os.getenv('phase')}/generation/2_{file_box[student_id]['agent']}_{args[0]}.csv\
                                  --bidresult ../../input/bidresult/student/{student_id}/{args[0]}.csv\
@@ -154,6 +159,9 @@ def execute_student_code(student_id, file_box, *args):
         logger.error(f"{student_id} code time out.")
         return
     except Exception as e:
+        logger.error(f"{student_id} code error: {process.stderr}")
+        return
+    if process.returncode != 0:
         logger.error(f"{student_id} code error: {process.stderr}")
         return
     logger.success(f"{student_id} code successfully executed")

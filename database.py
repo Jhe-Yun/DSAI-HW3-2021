@@ -82,11 +82,15 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     conn, cur = db_connect()
     filepath = "./data/output/"
     match_time = datetime.strptime(match_time, "%Y%m%d")
-    bids = pd.read_csv(f"{filepath}{filename}.csv")
-    if len(bids) > 100:
-        conn.close()
-        logger.error(f"{student_id} output csv length exceed the limit")
-        conn.close()
+    try:
+        bids = pd.read_csv(f"{filepath}{filename}.csv")
+        if len(bids) > 100:
+            conn.close()
+            logger.error(f"{student_id} output csv length exceed the limit")
+            conn.close()
+            return
+    except Exception as e:
+        logger.error(e)
         return
 
     # check student output file
