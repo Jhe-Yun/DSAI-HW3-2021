@@ -58,7 +58,8 @@ def calculate_hour_bill(time, flag, file_box, upload_df):
         if money != 0:
             bills.append([flag, student_id, time, money])
 
-    bill_insert(bills)
+    return bills
+    # bill_insert(bills)
 
 
 def calculate_total_bill_rank(upload_df):

@@ -10,7 +10,7 @@ import pandas as pd
 import multiprocessing as mp
 from datetime import datetime, timedelta
 from loguru import logger
-from database import bids_insert, db_get, student_sync
+from database import bids_insert, bill_insert, db_get, student_sync
 from match import match
 from bill import calculate_hour_bill, calculate_total_bill_rank
 
@@ -140,7 +140,7 @@ def execute_student_code(student_id, file_box, *args):
     if args[1].at[student_id] == "F" and (file_box[student_id]["flag"] != 0 or args[0] != os.getenv("trans_first_interval")):
         logger.info(f"{student_id} code error")
         return
-    logger.info(f"flag= {file_box[student_id]['flag']}, interval= {args[0]}, status= {args[1].at[student_id]}")
+    # logger.info(f"flag= {file_box[student_id]['flag']}, interval= {args[0]}, status= {args[1].at[student_id]}")
 
     code_path = f"./data/code/{file_box[student_id]['filename']}/"
 
@@ -295,7 +295,7 @@ def beta_bidresult_to_csv(student_id, file_box, *args):
 
     data.drop(columns=["bid", "agent", "mid", "bidder", "flag"], inplace=True)
     data.to_csv(file_path, index=False)
-    logger.success(f"success wrote data to {file_path}")
+    # logger.success(f"success wrote data to {file_path}")
 
 
 def period_transaction(file_box, upload_df):
@@ -324,16 +324,18 @@ def period_transaction(file_box, upload_df):
             multi_processing(beta_bidresult_to_csv, file_box, "input_bidresult_url", interval, start_time, temp_end_time)
 
             multi_processing(execute_student_code, file_box, interval, upload_df.loc[:, "status"])
-            logger.info(f"{interval}")
+            # logger.info(f"{interval}")
 
             ### 這個 student_num 每次可能都不同 ###
             success_num = check_student_code(upload_df)
 
+            day_bills = []
             for hour in range(24):
                 match_time = (start_time + timedelta(hours=(7 * 24 + hour))).strftime("%Y-%m-%d %H:%M:%S")
                 logger.info(f"match_time: {match_time}")
                 match(match_time, flag)
-                calculate_hour_bill(match_time, flag, file_box, upload_df)
+                day_bills.extend(calculate_hour_bill(match_time, flag, file_box, upload_df))
+            bill_insert(day_bills)
 
             ###
             # if upload_df.loc[student_id, "status"] != "P"
@@ -406,7 +408,7 @@ def update_history(history_page, mid, rank_series):
 
 
 def multi_processing(func, file_box, *args):
-    with mp.Pool(mp.cpu_count()-2) as pool:
+    with mp.Pool(mp.cpu_count()) as pool:
         for student_id in file_box.keys():
             pool.apply_async(
                 func,
@@ -418,9 +420,6 @@ def multi_processing(func, file_box, *args):
 
 def routine(mid, upload_page, student_page, info_page, history_page, upload_root_path):
 
-    info_page.clear(start="A2", end="H40000")
-    upload_page.clear(start="A2", end="G100")
-
     sync_student(upload_page, history_page, student_page)
     logger.info("updated student ID")
 
@@ -430,7 +429,7 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
                                       end=(row_num, col_num),
                                       numerize=False,
                                       include_tailing_empty=False)
-    # upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
+    upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
     upload_df.loc[:, "mid"] = mid
     logger.info("get upload page")
 
@@ -448,6 +447,9 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
     calculate_total_bill_rank(upload_df)
     logger.info("update all student bill and rank")
 
+    info_page.clear(start="A2", end="H40000")
+    upload_page.clear(start="A2", end="G100")
+
     upload_page.set_dataframe(upload_df.iloc[:, :-1], start="A2", copy_head=False, copy_index=True, nan='')
     logger.info("update upload page")
 
@@ -455,13 +457,17 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
     logger.info("update time")
 
     info_df = update_information(mid, len(file_box))
-    if not info_df.empty:
-        info_page.set_dataframe(info_df, start="A2", copy_head=False, nan='')
-        logger.info("info page no data")
-    logger.info("update info page")
+    try:
+        if not info_df.empty:
+            info_page.set_dataframe(info_df, start="A2", copy_head=False, nan='')
+            logger.info("info page update")
+        logger.info("update info page")
+    except Exception as e:
+        logger.error(e)
 
     info_page.update_value("K3", mid)
-    logger.info("update info mid")
+    upload_page.update_value("J5", mid)
+    logger.info("update mid")
 
     info_page.update_value("K4", success_num)
     logger.info(f"update info student num: {success_num}")
