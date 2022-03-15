@@ -6,9 +6,11 @@ import time
 import copy
 import random
 import zipfile
+import pathlib
 import pandas as pd
 import multiprocessing as mp
 from datetime import datetime, timedelta
+from config import get_time
 from loguru import logger
 from database import bids_insert, bill_insert, db_get, student_sync
 from match import match
@@ -68,13 +70,25 @@ def file_manage(student_list, root_path):
         for filename in files:
             temp = filename.split("-")
             if len(temp) == 1:
-                temp = (temp[0].split(".")[0] + "-1" + temp[0].split(".")[1]).split('-')
+                logger.error(f"{temp[0]} filename error")
+                continue
+                # temp = (temp[0].split(".")[0] + "-1" + temp[0].split(".")[1]).split('-')
 
             temp[0] = temp[0].upper()
             # delete student_id when not exist in list
             if not temp[0] in student_list:
                 logger.error(f"{temp[0]} not in student_list")
                 continue
+
+            # check student use ".zip"
+            try:
+                student_file = pathlib.Path(os.path.join(root, filename))
+                if student_file.suffixes[-1] != ".zip":
+                    logger.error(f"{temp[0]} suffix error: {student_file.suffixes}")
+                    continue
+            except Exception as e:
+                logger.error(e)
+
             file_box[temp[0]] = file_box.get(temp[0], {"version": list(), "path": list(), "filename": list()})
             temp[1] = float(re.findall(r"\d+\.?\d*", temp[1])[0])
             file_box[temp[0]]["version"].append(temp[1])
@@ -298,7 +312,7 @@ def beta_bidresult_to_csv(student_id, file_box, *args):
     # logger.success(f"success wrote data to {file_path}")
 
 
-def period_transaction(file_box, upload_df):
+def period_transaction(file_box, upload_df, upload_page):
 
     mid = upload_df.iat[0, -1]
     success_num = 0
@@ -343,6 +357,7 @@ def period_transaction(file_box, upload_df):
             ###
             start_time += timedelta(days=1)
 
+        update_upload_status(upload_page, flag, len(file_box))
         logger.info(f"The {flag}th tansaction has been compeleted, with {success_num} participants.")
 
     multi_processing(student_remove_env, file_box)
@@ -350,6 +365,46 @@ def period_transaction(file_box, upload_df):
     bill_to_csv(mid, len(file_box), upload_df)
 
     return success_num
+
+
+# def update_information(mid, student_num):
+#     """
+#     update information page by bids database
+
+#     Parameter:
+#     - mid
+#     - student_num
+#     """
+
+#     info_list = list()
+#     for flag in range(student_num):
+
+#         start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
+#         end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
+#         while start_time < end_time:
+#             data = db_get("bids", time=start_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
+
+#             target_buy_volume = "{:.2f}".format(sum(data[data["action"] == "buy"]["target_volume"]))
+#             target_sell_volume = "{:.2f}".format(sum(data[data["action"] == "sell"]["target_volume"]))
+#             target_num = len(data)
+#             trade_price = -1 if data.empty else data.loc[0, "trade_price"]
+#             trade_data = data[data["status"] != "未成交"]
+#             trade_volume = "{:.2f}".format(sum(trade_data["trade_volume"]))
+#             trade_num = len(trade_data)
+
+#             info_list.append([flag, start_time,
+#                               target_buy_volume, target_sell_volume, target_num,
+#                               trade_price, trade_volume, trade_num])
+
+#             start_time += timedelta(hours=1)
+
+#     info_df = pd.DataFrame(info_list,
+#                            columns=["flag", "start_time",
+#                                     "target_buy_volume", "target_sell_volume", "target_num",
+#                                     "trade_price", "trade_volume", "trade_num"])
+#     info_df.to_csv(f"{os.getenv('download_url')}information/info-{mid}.csv", index=False)
+#     logger.info("success info data to ftp")
+#     return info_df
 
 
 def update_information(mid, student_num):
@@ -363,17 +418,18 @@ def update_information(mid, student_num):
 
     info_list = list()
     for flag in range(student_num):
+        data = db_get("bids", flag=flag)
 
         start_time = datetime.strptime(os.getenv("bill_start_time"), "%Y-%m-%d %H:%M:%S")
         end_time = datetime.strptime(os.getenv("bill_end_time"), "%Y-%m-%d %H:%M:%S")
         while start_time < end_time:
-            data = db_get("bids", time=start_time.strftime("%Y-%m-%d %H:%M:%S"), flag=flag)
+            day_data = copy.deepcopy(data[data["time"] == start_time.strftime("%Y-%m-%d %H:%M:%S")])
 
-            target_buy_volume = "{:.2f}".format(sum(data[data["action"] == "buy"]["target_volume"]))
-            target_sell_volume = "{:.2f}".format(sum(data[data["action"] == "sell"]["target_volume"]))
-            target_num = len(data)
-            trade_price = -1 if data.empty else data.loc[0, "trade_price"]
-            trade_data = data[data["status"] != "未成交"]
+            target_buy_volume = "{:.2f}".format(sum(day_data[day_data["action"] == "buy"]["target_volume"]))
+            target_sell_volume = "{:.2f}".format(sum(day_data[day_data["action"] == "sell"]["target_volume"]))
+            target_num = len(day_data)
+            trade_price = -1 if day_data.empty else day_data["trade_price"].values.tolist()[0]
+            trade_data = day_data[day_data["status"] != "未成交"]
             trade_volume = "{:.2f}".format(sum(trade_data["trade_volume"]))
             trade_num = len(trade_data)
 
@@ -407,6 +463,11 @@ def update_history(history_page, mid, rank_series):
     history_page.insert_cols(col=col_num, number=1, values=data)
 
 
+def update_upload_status(page, flag, total_person):
+    page.update_value("J5", f"更新中({flag+1}/{total_person})")
+    return
+
+
 def multi_processing(func, file_box, *args):
     with mp.Pool(mp.cpu_count()) as pool:
         for student_id in file_box.keys():
@@ -420,13 +481,16 @@ def multi_processing(func, file_box, *args):
 
 def routine(mid, upload_page, student_page, info_page, history_page, upload_root_path):
 
+    upload_page.update_value("J3", get_time())
+    upload_page.update_value("J5", "更新中")
+
     sync_student(upload_page, history_page, student_page)
     logger.info("updated student ID")
 
     col_num = len(upload_page.get_row(1, include_tailing_empty=False))
     row_num = len(upload_page.get_col(1, include_tailing_empty=False))
     upload_df = upload_page.get_as_df(index_column=1,
-                                      end=(row_num, col_num),
+                                      end=(row_num, col_num-1),
                                       numerize=False,
                                       include_tailing_empty=False)
     upload_df.loc[:, ["status", "filename", "last time", "bill", "rank"]] = ""
@@ -441,7 +505,7 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
     multi_processing(unzip_file, file_box)
     logger.info("unzip all student file")
 
-    success_num = period_transaction(file_box, upload_df)
+    success_num = period_transaction(file_box, upload_df, upload_page)
     logger.info("all matchs are done")
 
     calculate_total_bill_rank(upload_df)
@@ -453,8 +517,22 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
     upload_page.set_dataframe(upload_df.iloc[:, :-1], start="A2", copy_head=False, copy_index=True, nan='')
     logger.info("update upload page")
 
-    upload_page.update_value("J3", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
+    upload_page.update_value("J4", time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()))
     logger.info("update time")
+
+    upload_page.update_value("J6", mid)
+    info_page.update_value("K3", mid)
+    logger.info("update mid")
+
+    update_history(history_page, mid, upload_df["rank"])
+    logger.info("update history page")
+
+    info_page.update_value("K4", success_num)
+    logger.info(f"update info student num: {success_num}")
+
+    status_code = student_sync(copy.deepcopy(upload_df))
+    if status_code == 400:
+        logger.error("db sync student error")
 
     info_df = update_information(mid, len(file_box))
     try:
@@ -465,18 +543,6 @@ def routine(mid, upload_page, student_page, info_page, history_page, upload_root
     except Exception as e:
         logger.error(e)
 
-    info_page.update_value("K3", mid)
-    upload_page.update_value("J5", mid)
-    logger.info("update mid")
-
-    info_page.update_value("K4", success_num)
-    logger.info(f"update info student num: {success_num}")
-
-    update_history(history_page, mid, upload_df["rank"])
-    logger.info("update history page")
-
-    status_code = student_sync(copy.deepcopy(upload_df))
-    if status_code == 400:
-        logger.error("db sync student error")
+    upload_page.update_value("J5", "已更新")
 
     return success_num

@@ -12,3 +12,4 @@ test.py
 account/*.sh
 account/data.csv
 account/info.csv
+account/*.txt

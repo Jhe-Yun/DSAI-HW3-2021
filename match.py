@@ -4,6 +4,22 @@ from typing import List
 from database import db_get, bids_update
 from loguru import logger
 
+def line_intersection(line1, line2):
+    xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
+    ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1])
+
+    def det(a, b):
+        return a[0] * b[1] - a[1] * b[0]
+
+    div = det(xdiff, ydiff)
+    if div == 0:
+       raise Exception('lines do not intersect')
+
+    d = (det(*line1), det(*line2))
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
+    return x, y
+
 class Point:
     def __init__(self, x, y):
         self.x = x
@@ -126,7 +142,7 @@ class MatchMaker:
                     action=bid.action,
                     price=bid.price,
                     bidder=bid.bidder,
-                    value=sum(sum_bid.value for sum_bid in bids[: i + 1]),
+                    value=round(sum(sum_bid.value for sum_bid in bids[: i + 1]), 2),
                 )
                 for i, bid in enumerate(bids)
             ]
@@ -189,10 +205,11 @@ class MatchMaker:
             buy_line = (b1, b2)
             sell_line = (s1, s2)
             if doIntersect(*buy_line, *sell_line):
-                matched_price = b2.y
-                matched_value = b2.x
-                thresh_buy = b2.y
-                thresh_sell = s2.y
+                value, price = line_intersection(((buy_line[0].x, buy_line[0].y), (buy_line[1].x, buy_line[1].y)), ((sell_line[0].x, sell_line[0].y), (sell_line[1].x, sell_line[1].y)))
+                matched_price = price
+                matched_value = value
+                thresh_buy = max(b1.y, b2.y)
+                thresh_sell = min(s1.y, s2.y)
                 return True, (matched_price, matched_value, thresh_buy, thresh_sell)
 
         return False, None
@@ -292,7 +309,7 @@ def match(match_time, flag):
         has_result, ret = MatchMaker().match(buys, sells)
         if ret:
             win_buys, win_sells = ret
-            logger.info(f"win_buys: {win_buys}")
-            logger.info(f"win_sells: {win_sells}")
+            # logger.info(f"win_buys: {win_buys}")
+            # logger.info(f"win_sells: {win_sells}")
 
     bids_update(match_time, flag, win_buys, win_sells)

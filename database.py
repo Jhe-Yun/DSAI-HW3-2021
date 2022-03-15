@@ -96,6 +96,8 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     # check student output file
     bids["target_price"] = bids["target_price"].map(lambda x: float("{:.2f}".format(x)))
     bids["target_volume"] = bids["target_volume"].map(lambda x: float("{:.2f}".format(x)))
+    bids = bids[bids["target_price"] > 0]
+    bids = bids[bids["target_volume"] > 0]
 
     try:
         bids["time"] = bids["time"].map(lambda x: datetime.strptime(x, "%Y-%m-%d %H:%M:%S"))
@@ -111,9 +113,10 @@ def bids_insert(student_id, filename, flag, agent, match_time):
     try:
         if not bids.empty:
             bids.to_sql("bids", con=conn, if_exists="append", index=False)
-            logger.success(f"{student_id} bids insert into db")
+            # logger.success(f"{student_id} bids insert into db")
         else:
-            logger.info(f"{student_id} bids no data")
+            pass
+            # logger.info(f"{student_id} bids no data")
     except Exception as e:
         logger.error(e)
 
@@ -157,12 +160,12 @@ def bids_update(time, flag, buys, sells):
     data.reset_index(inplace=True)
     data = data[["trade_price", "trade_volume", "status", "bid"]]
     params = [bid for bid in data.itertuples(index=False, name=None)]
-    logger.debug(params)
+    # logger.debug(params)
     cur.executemany('''UPDATE bids
                        SET trade_price = ?, trade_volume = ?, status = ?
                        WHERE bid = ?''', params)
     conn.commit()
-    logger.success(f"success wrote data to db")
+    logger.success(f"success bids_update data wrote to db")
 
     conn.close()
     return
@@ -200,7 +203,7 @@ def db_get(table, **kwargs):
     """
 
     conn, cur = db_connect()
-
+    # mid=73
     query = f'''SELECT *
                 FROM {table}
                 WHERE mid = {mid} and ''' + " and ".join(param + " = :" + param for param in kwargs)

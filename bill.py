@@ -73,7 +73,7 @@ def calculate_total_bill_rank(upload_df):
     for student_id in upload_df.index:
         data = db_get("bill", sid=student_id)
         bill = (float("{:.2f}".format(sum(data["money"])))
-                if not data.empty
+                if upload_df.loc[student_id, "status"] == "P"
                 else sys.maxsize)
         upload_df.at[student_id, "bill"] = bill
 
